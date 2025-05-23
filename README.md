@@ -26,7 +26,7 @@ OS：CP/M-86 1.1
 CPM80.A86 ---- ソースファイル  
 CPM80.LST ---- ASM86が生成するリスティングファイル  
 CPM80.H86 ---- ASM86が生成するHEXファイル  
-CPM80.CMD ---- MASMが生成するCP/M-86実行形式ファイル  
+CPM80.CMD ---- ASM86が生成するCP/M-86実行形式ファイル  
 Z80EM.BIN ---- Z80命令エミュレーター  
 CPM80-64.BIN - CP/M-80のBDOSおよびCCP  
 86.COM ------- CP/M-86に戻るコマンド  

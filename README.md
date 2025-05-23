@@ -53,7 +53,7 @@ https://github.com/Gazelle8087/Z80-instruction-executor-for-x86
 
 ## CP/M-80のBDOSおよびCCP
 
-下記リポジトリの CPM22_CCP_BDPS.BIN をCP/Mで扱えるよう  
+下記リポジトリの CPM22_CCP_BDOS.BIN をCP/Mで扱えるよう  
 （8文字+拡張子3文字）にリネームしたものです。  
 https://github.com/Gazelle8087/SBC8080-CPM/tree/main/z80
 

@@ -1,0 +1,1036 @@
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE   1
+
+
+                        ;       CP/M-80 2.2 on CP/M-86
+                        ;
+                        ;       Copyright (C) 2025 by Gazelle
+                        ;
+                        ;Permission is hereby granted, free of charge, to any person
+                        ;obtaining a copy of this software and associated documentation
+                        ;files (the "Software"), to deal in the Software without
+                        ;restriction, including without limitation the rights to use,
+                        ;copy, modify, merge, publish, distribute, sublicense, and/or sell
+                        ;copies of the Software, and to permit persons to whom the
+                        ;Software is furnished to do so, subject to the following
+                        ;conditions:
+                        ;
+                        ;The above copyright notice and this permission notice shall be
+                        ;included in all copies or substantial portions of the Software.
+                        ;
+                        ;THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+                        ;EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+                        ;OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+                        ;NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+                        ;HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+                        ;WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+                        ;FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+                        ;OTHER DEALINGS IN THE SOFTWARE.
+
+                        ;Repository https://github.com/Gazelle8087/CPM80-on-CPM86
+                        ;
+                        ;2025/5/23 Rev. 1.00 Initial release
+
+   0C40                 free_top        equ     0c40h
+   E400                 ccptop          equ     0e400h
+   EC06                 bdostop         equ     0ec06h
+   FA00                 biostop         equ     0fa00h
+   FA33                 DPH             equ     0fa33h
+   FF18                 DIRBUF          equ     0ff18h
+   FF98                 XLT_80          equ     0ff98h
+   FF98                 bios_code_start equ     0ff98h
+   C000                 bios86_area     equ     0c000h
+
+                                        cseg
+                                        org     100h
+
+ 0100 8CC8                              mov     ax,cs
+ 0102 8ED8                              mov     ds,ax
+ 0104 B109                              mov     cl,9
+ 0106 BA84D6                            mov     dx,offset open_msg
+ 0109 CDE0                              int     0e0h            ;display open message
+
+ 010B B80000                            mov     ax,0
+ 010E 8EC0                              mov     es,ax
+ 0110 26A18203                          mov     ax,es:.382h     ;segment of INT E0
+ 0114 3D6000                            cmp     ax,word ptr 60h ;bios segment is 60h ?
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE   2
+
+
+ 0117 7603         011C                 jbe     bios_seg_ok
+ 0119 E932DB       DC4E                 jmp     no_mem
+                        bios_seg_ok:
+ 011C 2EA39301                          mov     bios_seg,ax
+
+ 0120 B80000                            mov     ax,0
+ 0123 8EC0                              mov     es,ax
+ 0125 26A17003                          mov     ax,es:.370h     ;offset  of INT DC
+ 0129 268B1E7203                        mov     bx,es:.372h     ;segment of INT DC
+ 012E 268B0E7403                        mov     cx,es:.374h     ;offset  of INT DD 
+
+ 0133 3BC1                              cmp     ax,cx
+ 0135 7418         014F                 je      is_not_98
+ 0137 83FB60                            cmp     bx,060h
+ 013A 7513         014F                 jne     is_not_98
+ 013C 8CC8                              mov     ax,cs
+ 013E 8ED8                              mov     ds,ax
+ 0140 8EC0                              mov     es,ax
+ 0142 2EC6067AD601                      mov     is98,1
+ 0148 BADED6                            mov     dx,offset is98_msg
+ 014B B109                              mov     cl,9
+ 014D CDE0                              int     0e0h
+                        is_not_98:      
+ 014F E8C9DB       DD1B                 call    crlf
+ 0152 B138                              mov     cl,38h          ;alloc ABS memory
+ 0154 BA00D6                            mov     dx,offset MCB1  ;for BIOS routine
+ 0157 CDE0                              int     0e0h
+ 0159 22C0                              and     al,al
+ 015B 7403         0160                 jz      biosmem_ok
+ 015D E9EEDA       DC4E                 jmp     no_mem
+                        biosmem_ok:
+ 0160 B137                              mov     cl,37h          ;alloc memory
+ 0162 BA06D6                            mov     dx,offset seg80 ;for CP/M-80 memory
+ 0165 CDE0                              int     0e0h
+ 0167 22C0                              and     al,al
+ 0169 7403         016E                 jz      Z80mem_ok
+ 016B E9E0DA       DC4E                 jmp     no_mem
+                        z80mem_ok:
+ 016E B137                              mov     cl,37h          ;alloc memory
+ 0170 BA0CD6                            mov     dx,offset MCB3  ;for Z80 emulator
+ 0173 CDE0                              int     0e0h
+ 0175 22C0                              and     al,al
+ 0177 7403         017C                 jz      mem_ok
+ 0179 E9D2DA       DC4E                 jmp     no_mem
+                        mem_ok:
+ 017C 2EA19301                          mov     ax,bios_seg
+ 0180 8EC0                              mov     es,ax
+ 0182 BE00C0                            mov     si,bios86_area
+ 0185 8BFE                              mov     di,si
+ 0187 33C9                              xor     cx,cx
+ 0189 2BCE                              sub     cx,si
+ 018B D1E9                              shr     cx,1
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE   3
+
+
+ 018D FC                                cld
+ 018E F3A5                              rep     movsw           ;transfer CP/M-86 BIOS
+
+ 0190 EA                                db      0eah
+ 0191 8FD7                              dw      go80
+ 0193 6000              bios_seg        dw      60h             ;Jump to CP/M-80 emulation routine
+                        ;-----------------------------------
+                                org     2500h
+                        jmp_tbl:
+ 2500 E9FDFF       2500 init:           jmp     init
+ 2503 E9FDFF       2503 wboot:          jmp     wboot
+ 2506 E9FDFF       2506 const:          jmp     const
+ 2509 E9FDFF       2509 conin:          jmp     conin
+ 250C E9FDFF       250C conout:         jmp     conout
+ 250F E9FDFF       250F listo:          jmp     listo
+ 2512 E9FDFF       2512 punch:          jmp     punch
+ 2515 E9FDFF       2515 reader:         jmp     reader
+ 2518 E9FDFF       2518 home:           jmp     home
+ 251B E9FDFF       251B seldsk:         jmp     seldsk
+ 251E E9FDFF       251E settrk:         jmp     settrk
+ 2521 E9FDFF       2521 setsec:         jmp     setsec
+ 2524 E9FDFF       2524 setdma:         jmp     setdma
+ 2527 E9FDFF       2527 read:           jmp     read
+ 252A E9FDFF       252A write:          jmp     write
+ 252D E9FDFF       252D listst:         jmp     listst
+ 2530 E9FDFF       2530 sectran:        jmp     sectran
+ 2533 E9FDFF       2533 setdmab:        jmp     setdmab
+ 2536 E9FDFF       2536 getsegb:        jmp     getsegb
+ 2539 E9FDFF       2539 getiob:         jmp     getiob
+ 253C E9FDFF       253C setiob:         jmp     setiob
+
+                        ;---------------------------------------------------
+                        ;---------------  Driver routine  ------------------
+                        ;---------------------------------------------------
+                                        org     bios86_area
+
+ C000                   bdosccp         rs      biostop - ccptop        ;BDOS & CCP is read here 
+
+ D600 400C              MCB1            dw      free_top
+ D602 0004                              dw      1000h-bios86_area/16    ;16KB
+ D604 0000                              dw      0
+
+ D606 0000              seg80           dw      0                       ;Z80 code is loaded here
+ D608 0010                              dw      1000h                   ;64KB
+ D60A 0000                              dw      0
+
+ D60C 0000              MCB3            dw      0                       ;Z80EM.BIN is loaded here
+ D60E 0010                              dw      1000h                   ;64KB
+ D610 0000                              dw      0
+
+ D612 B3D8              biostable       dw      init0
+ D614 C6D8                              dw      wboot0
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE   4
+
+
+ D616 0625                              dw      const
+ D618 0925                              dw      conin
+ D61A 0C25                              dw      conout
+ D61C 0F25                              dw      listo
+ D61E 1225                              dw      punch
+ D620 1525                              dw      reader
+ D622 1825                              dw      home
+ D624 C9D9                              dw      seldsk0
+ D626 1E25                              dw      settrk
+ D628 2125                              dw      setsec
+ D62A 2425                              dw      setdma
+ D62C 2725                              dw      read
+ D62E 2A25                              dw      write
+ D630 2D25                              dw      listst
+
+ D632 0043504D3830      fcb             db      0,'CPM80-64BIN'
+      2D363442494E
+ D63E                                   rb      21
+ D653 0000              f_size          dw      0
+ D655 00                                db      0
+
+ D656 005A3830454D      fcb_em          db      0,'Z80EM   BIN'
+      20202042494E
+ D662                                   rb      21
+ D677 0000              f_size_em       dw      0
+ D679 00                                db      0
+
+ D67A 00                is98            db      0
+ D67B 00                user_code       db      0
+ D67C 00                sel_drv         db      0
+ D67D 0000              sel_drv_W       dw      0
+ D67F 00                ok_drv          db      0
+                        ;undef_flag     db      0
+ D680 0000              save_si         dw      0
+ D682 0000              save_di         dw      0
+
+ D684 52756E6E696E      open_msg        db      'Running on software Z80 emulation.',0dh,0ah
+      67206F6E2073
+      6F6674776172
+      65205A383020
+      656D756C6174
+      696F6E2E0D0A
+ D6A8 36346B204350                      db      '64k CP/M-80 Version 2.2',0dh,0ah
+      2F4D2D383020
+      56657273696F
+      6E20322E320D
+      0A
+ D6C1 436F70797269                      db      'Copyright (c) Gazelle 2025',0dh,0ah,24h
+      676874202863
+      292047617A65
+      6C6C65203230
+      32350D0A24
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE   5
+
+
+ D6DE 50432D393878      is98_msg        db      'PC-98x1 running',0dh,0ah,24h 
+      312072756E6E
+      696E670D0A24
+ D6F0 0D0A52657475      endmsg          db      0dh,0ah,'Return to CP/M-86.',0dh,0ah,24h
+      726E20746F20
+      43502F4D2D38
+      362E0D0A24
+ D707 0D0A43504D38      no_bdos_msg     db      0dh,0ah,'CPM80-64.BIN not found.',0dh,0ah,24h
+      302D36342E42
+      494E206E6F74
+      20666F756E64
+      2E0D0A24
+ D723 0D0A5A383045      no_z_msg        db      0dh,0ah,'Z80EM.BIN not found.',0dh,0ah,24h
+      4D2E42494E20
+      6E6F7420666F
+      756E642E0D0A
+      24
+ D73C 0D0A6E6F206D      errmsg          db      0dh,0ah,'no memory.',0dh,0ah,24h
+      656D6F72792E
+      0D0A24
+ D74B 0D0A756E6465      undef_msg       db      0dh,0ah,'undefined OP code $'
+      66696E656420
+      4F5020636F64
+      652024
+ D760 0D0A756E6578      unexe_msg       db      0dh,0ah,'unexecutable OP code $'
+      656375746162
+      6C65204F5020
+      636F64652024
+ D778 0D0A496E7465      in_err_msg      db      0dh,0ah,'Internal error.$'
+      726E616C2065
+      72726F722E24
+ D78A 2061742024        em_err_msg      db      ' at $'
+
+                        go80:
+ D78F 2EA10CD6                          mov     ax,MCB3
+ D793 2EA30ED8                          mov     seg_z80em,ax
+
+ D797 E8C304       DC5D                 call    read_bdosccp    ;read CPM80-64.BIN
+ D79A 7303         D79F                 jnc     read_bdos_ok
+ D79C E9A504       DC44                 jmp     no_bdos_error
+                        read_bdos_ok:
+ D79F E80105       DCA3                 call    read_emulator   ;read Z80EM.BIN
+ D7A2 7303         D7A7                 jnc     read_emz80_ok
+ D7A4 E9A204       DC49                 jmp     no_emulator_error
+                        read_emz80_ok:
+ D7A7 B107                              mov     cl,07h          ;get I/O byte
+ D7A9 CDE0                              int     0e0h
+ D7AB 2E8E0606D6                        mov     es,seg80
+ D7B0 26A20300                          mov     es:.3,al
+
+ D7B4 B120                              mov     cl,20h          ;get user code
+ D7B6 B2FF                              mov     dl,0ffh
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE   6
+
+
+ D7B8 CDE0                              int     0e0h
+ D7BA 2EA27BD6                          mov     user_code,al
+
+ D7BE B119                              mov     cl,19h          ;get current drive              
+ D7C0 CDE0                              int     0e0h
+                                        
+ D7C2 2E8A1E7BD6                        mov     bl,user_code
+ D7C7 80E30F                            and     bl,0fh
+ D7CA B104                              mov     cl,4
+ D7CC D2E3                              shl     bl,cl
+
+ D7CE 240F                              and     al,0fh
+ D7D0 02C3                              add     al,bl
+ D7D2 8AC8                              mov     cl,al
+ D7D4 2E8E0606D6                        mov     es,seg80
+ D7D9 26A20400                          mov     es:.4,al
+
+ D7DD E81103       DAF1                 call    setup_dph
+
+ D7E0 E9E300       D8C6                 jmp     wboot0          ;transfer CP/M-80 BDOS & CCP
+
+                        ;------------------------------------------------
+                        bios_em:
+ D7E3 8CCD                              mov     bp,cs
+ D7E5 8EDD                              mov     ds,bp
+ D7E7 8EC5                              mov     es,bp
+ D7E9 893680D6                          mov     ds:save_si,si   ;ds=cs=60h
+ D7ED 893E82D6                          mov     ds:save_di,di
+ D7F1 B400                              mov     ah,0
+ D7F3 8BF8                              mov     di,ax
+ D7F5 03F8                              add     di,ax
+ D7F7 FF9512D6                          call    ds:biostable[di]
+                        emz80:
+ D7FB 8B3680D6                          mov     si,ds:save_si
+ D7FF 8B3E82D6                          mov     di,ds:save_di
+ D803 8B2E06D6                          mov     bp,ds:seg80
+ D807 8EDD                              mov     ds,bp
+ D809 8EC5                              mov     es,bp
+                        emz80_1:
+ D80B 9A                                db      09ah    ;CALL far
+ D80C E000                              dw      0e0h    ;Z80 emulator entry point
+ D80E 0000              seg_z80em       dw      0       ;emulator loading segment
+
+ D810 83FD02                            cmp     bp,2
+ D813 750F         D824                 jne     em_error
+ D815 81FE00FA                          cmp     si,biostop
+ D819 7209         D824                 jb      em_error
+ D81B AC                                lodsb
+ D81C 3C10                              cmp     al,10h
+ D81E 72C3         D7E3                 jb      bios_em
+ D820 E90000       D823                 jmp     em_error_0
+                        ;--------------------------------------
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE   7
+
+
+ D823 4E                em_error_0:     dec     si
+ D824 BA60D7            em_error:       mov     dx,offset unexe_msg
+ D827 B90100                            mov     cx,1
+ D82A BF0100                            mov     di,1
+ D82D 83FD01                            cmp     bp,1
+ D830 7448         D87A                 je      z80_error_0
+
+ D832 B90200                            mov     cx,2
+ D835 BF0100                            mov     di,1
+ D838 83FD02                            cmp     bp,2
+ D83B 743D         D87A                 je      z80_error_0
+
+ D83D B90200                            mov     cx,2
+ D840 BF0100                            mov     di,1
+ D843 83FD03                            cmp     bp,3
+ D846 7432         D87A                 je      z80_error_0
+
+ D848 B90200                            mov     cx,2
+ D84B BF0200                            mov     di,2
+ D84E 83FD04                            cmp     bp,4
+ D851 7427         D87A                 je      z80_error_0             
+
+ D853 BA4BD7                            mov     dx,offset undef_msg
+ D856 B90200                            mov     cx,2
+ D859 BF0200                            mov     di,2
+ D85C 83FD05                            cmp     bp,5
+ D85F 7419         D87A                 je      z80_error_0
+
+ D861 B90400                            mov     cx,4
+ D864 BF0400                            mov     di,4
+ D867 83FD06                            cmp     bp,6
+ D86A 740E         D87A                 je      z80_error_0
+
+ D86C B90100                            mov     cx,1
+ D86F BF0100                            mov     di,1
+ D872 83FD07                            cmp     bp,7
+ D875 7403         D87A                 je      z80_error_0
+
+ D877 E92F00       D8A9                 jmp     internal_error
+                        z80_error_0:
+ D87A 51                                push    cx
+ D87B 8CC8                              mov     ax,cs
+ D87D 8ED8                              mov     ds,ax
+ D87F B109                              mov     cl,9            ;print string
+ D881 CDE0                              int     0e0h
+ D883 59                                pop     cx
+
+ D884 2BF7                              sub     si,di
+ D886 8BFE                              mov     di,si
+ D888 2E8E0606D6                        mov     es,seg80
+                        z80_error_1:
+ D88D 51                                push    cx
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE   8
+
+
+ D88E 06                                push    es
+ D88F 268A04                            mov     al,es:[si]
+ D892 E85C04       DCF1                 call    put_hex2
+ D895 46                                inc     si
+ D896 07                                pop     es
+ D897 59                                pop     cx
+ D898 E2F3         D88D                 loop    z80_error_1
+
+ D89A BA8AD7                            mov     dx,offset em_err_msg
+ D89D B109                              mov     cl,9            ;print string
+ D89F CDE0                              int     0e0h
+
+ D8A1 8BC7                              mov     ax,di
+ D8A3 E84404       DCEA                 call    put_hex4
+ D8A6 E90A00       D8B3 em_error_2:     jmp     init0
+
+ D8A9 BA78D7            internal_error: mov     dx,offset in_err_msg
+ D8AC B109                              mov     cl,9
+ D8AE CDE0                              int     0e0h
+ D8B0 E90000       D8B3                 jmp     init0
+                        ;------------------------------------------------
+                        init0:
+ D8B3 8CC8                              mov     ax,cs
+ D8B5 8ED8                              mov     ds,ax
+ D8B7 BAF0D6                            mov     dx,offset endmsg
+ D8BA B109                              mov     cl,9            ;print string
+ D8BC CDE0                              int     0e0h
+ D8BE B90000                            mov     cx,0            ;System reset
+ D8C1 BA0000                            mov     dx,0
+ D8C4 CDE0                              int     0e0h
+                        ;---------------------------------------------------
+                        wboot0:
+ D8C6 2EA19301                          mov     ax,bios_seg
+ D8CA 8EC0                              mov     es,ax
+ D8CC BFB1DA                            mov     di,offset DPBADDR
+ D8CF B80000                            mov     ax,0
+ D8D2 B91000                            mov     cx,16
+ D8D5 FC                                cld
+ D8D6 F3AB                              rep     stosw                   ;clear DPB table
+
+ D8D8 8CC8                              mov     ax,cs
+ D8DA 8ED8                              mov     ds,ax
+ D8DC 2E8E0606D6                        mov     es,seg80
+
+ D8E1 BE00C0                            mov     si,offset bdosccp
+ D8E4 BF00E4                            mov     di,ccptop
+ D8E7 B9000B                            mov     cx,(biostop - ccptop)/2 ;0b00h
+ D8EA F3A5                              rep     movsw                   ;transfer CP/M-80 BDOS & CCP
+
+ D8EC BF00FA                            mov     di,biostop
+ D8EF BAB2FF                            mov     dx,offset init80 - offset sec_table + bios_code_start
+ D8F2 B3C3                              mov     bl,0c3h
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE   9
+
+
+ D8F4 B91100                            mov     cx,17
+                        put_bios_loop:                  
+ D8F7 8AC3                              mov     al,bl           ;store bios jump table
+ D8F9 AA                                stosb
+ D8FA 8BC2                              mov     ax,dx
+ D8FC AB                                stosw
+ D8FD 83C203                            add     dx,3
+ D900 E2F5         D8F7                 loop    put_bios_loop
+
+ D902 BE6FD9                            mov     si,offset sec_table
+ D905 BF98FF                            mov     di,bios_code_start      
+ D908 B95800                            mov     cx,offset bios_code_end - offset sec_table
+ D90B F3A4                              rep     movsb 
+
+ D90D B0C3                              mov     al,0c3h
+ D90F 26A20000                          mov     es:.0,al
+ D913 26C706010003                      mov     es:.1,word ptr biostop + 3      ;set jump table at 0
+      FA
+ D91A 26A20500                          mov     es:.5,al
+ D91E 26C706060006                      mov     es:.6,word ptr bdostop          ;BDOS entry address
+      EC
+ D925 2E803E7CD6FF                      cmp     sel_drv,-1
+ D92B 750C         D939                 jne     drvno_ok
+
+ D92D 2EA07FD6                          mov     al,ok_drv
+ D931 2EA27CD6                          mov     sel_drv,al
+ D935 26A20400                          mov     es:.4,al        ;set current drive
+                        drvno_ok:
+ D939 B133                              mov     cl,33h          ;Set DMA base
+ D93B 2E8B1606D6                        mov     dx,seg80
+ D940 CDE0                              int     0e0h
+ D942 B11A                              mov     cl,1ah          ;set DMA addr
+ D944 BA8000                            mov     dx,80h
+ D947 CDE0                              int     0e0h
+ D949 2E8E0606D6                        mov     es,seg80
+ D94E 268A0E0400                        mov     cl,es:.4
+ D953 BE00E4                            mov     si,ccptop
+ D956 BF8000                            mov     di,80h
+ D959 2E893E82D6                        mov     save_di,di
+ D95E 2E893680D6                        mov     save_si,si
+ D963 2E8B2E06D6                        mov     bp,seg80
+ D968 8EDD                              mov     ds,bp
+ D96A 8EC5                              mov     es,bp
+ D96C E99CFE       D80B                 jmp     emz80_1
+
+                        ;---------------------------------------------------------
+                        ;       BIOS code for CP/M-80 placed on 0ff98h
+                        ;---------------------------------------------------------
+ D96F 01070D131905      sec_table       db      1,7,13,19,25,5,11,17,23,3,9,15,21
+      0B111703090F
+      15
+ D97C 02080E141A06                      db      2,8,14,20,26,6,12,18,24,4,10,16,22
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE  10
+
+
+      0C1218040A10
+      16
+
+                        codemacro       z       imm:db
+                                        db      0d3h    ;OUT    (n),A
+                                        db      imm
+                                        db      0c9h    ;RET
+                        endm
+
+ D989 D300C9            init80:         z       0
+ D98C D301C9            wboot80:        z       1
+ D98F D302C9            const80:        z       2
+ D992 D303C9            conin80:        z       3
+ D995 D304C9            conout80:       z       4
+ D998 D305C9            list80:         z       5
+ D99B D306C9            punch80:        z       6
+ D99E D307C9            reader80:       z       7
+ D9A1 D308C9            home80:         z       8
+ D9A4 D309C9            seldsk80:       z       9
+ D9A7 D30AC9            settrk80:       z       10
+ D9AA D30BC9            setsec80:       z       11
+ D9AD D30CC9            setdma80:       z       12
+ D9B0 D30DC9            read80:         z       13
+ D9B3 D30EC9            write80:        z       14
+ D9B6 D30FC9            listst80:       z       15
+                        sectran80:
+ D9B9 60                                db      60h     ;MOV    H,B
+ D9BA 69                                db      69h     ;MOV    L,C
+ D9BB 7B                                db      7bh     ;MOV    A,E
+ D9BC 82                                db      82h     ;ADD    D
+ D9BD C2                                db      0c2h    ;JNZ    skew
+ D9BE EBFF                              dw      offset skew + bios_code_start - offset sec_table
+ D9C0 23                                db      23h     ;INX    H
+ D9C1 C9                                db      0c9h    ;RET
+                        skew:
+ D9C2 19                                db      19h     ;DAD    D
+ D9C3 6E                                db      6eh     ;MOV    L,M
+ D9C4 2600                              db      26h,0   ;MVI    H,0
+ D9C6 C9                                db      0c9h    ;RET
+                        bios_code_end:
+                        ;-------------------------------------------------
+                        ;       END of CP/M-80 bios code
+                        ;-------------------------------------------------
+ D9C7 0000              XLT_86          dw      0
+
+                        seldsk0:                                ;cs=ds=60h
+ D9C9 2E880E7CD6                        mov     sel_drv,cl      ;cl selected drive
+ D9CE 8AC1                              mov     al,cl
+ D9D0 B400                              mov     ah,0
+ D9D2 03C0                              add     ax,ax
+ D9D4 2EA37DD6                          mov     sel_drv_w,ax
+ D9D8 E8404B       251B                 call    seldsk
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE  11
+
+
+ D9DB 23DB                              and     bx,bx           ;bx DPH addr
+ D9DD 7503         D9E2                 jnz     sel_ok1
+ D9DF E98400       DA66                 jmp     selerr
+
+ D9E2 8B07              sel_ok1:        mov     ax,ds:[bx]
+ D9E4 23C0                              and     ax,ax   
+ D9E6 7415         D9FD                 jz      sel_ok
+ D9E8 8BD0                              mov     dx,ax
+ D9EA 2EA1C7D9                          mov     ax,XLT_86
+ D9EE 23C0                              and     ax,ax
+ D9F0 7507         D9F9                 jnz     chk_XLT_86
+ D9F2 2E8916C7D9                        mov     XLT_86,dx
+ D9F7 EB04         D9FD                 jmps    sel_ok
+ D9F9 3BC2              chk_XLT_86:     cmp     ax,dx
+ D9FB 7569         DA66                 jne     sel_err
+                        sel_ok:
+ D9FD 2E8B367DD6                        mov     si,sel_drv_w
+ DA02 2E8BBCD1DA                        mov     di,dph_addr[si]         ;di DPH of CPM80
+ DA07 2E8E0606D6                        mov     es,seg80                ;es segment of 80 area 
+ DA0C 268B450A                          mov     ax,es:10[di]            ;ax DPB of CPM80
+ DA10 3B470A                            cmp     ax,10[bx]               ;10[bx] DPB of CPM86
+ DA13 7509         DA1E                 jne     first_acc               ;if DPB80=DPB86 
+ DA15 2EA07CD6                          mov     al,sel_drv
+ DA19 2EA27FD6                          mov     ok_drv,al
+ DA1D C3                                ret
+                        first_acc:                                      ;copy DPB(86) to DPB(80)
+ DA1E 8B770A                            mov     si,ds:10[bx]            ;si=DPB address of 86
+ DA21 2E8B3E7DD6                        mov     di,sel_drv_w
+ DA26 89B5B1DA                          mov     ds:DPB_addr[di],si      ;store DPBADDR
+ DA2A 8BBDD1DA                          mov     di,ds:DPH_addr[di]      ;di=DPH address of 80
+ DA2E 23FF                              and     di,di                   ;DPH = 0 then no drive
+ DA30 7431         DA63                 jz      selerr1
+ DA32 268B7D0A                          mov     di,es:10[di]            ;di=DPB address of 80
+ DA36 B90700                            mov     cx,7
+ DA39 FC                                cld
+ DA3A F3A5                              rep     movsw
+ DA3C A4                                movsb
+
+ DA3D 8B37                              mov     si,ds:[bx]              ;si=skew table of 86    
+ DA3F 23F6                              and     si,si
+ DA41 740B         DA4E                 jz      no_skew
+ DA43 BF98FF                            mov     di,XLT_80               ;di=skew table of 80
+ DA46 B90D00                            mov     cx,13
+ DA49 F3A5                              rep     movsw
+ DA4B BE98FF                            mov     si,XLT_80
+                        no_skew:
+ DA4E 2E8B3E7DD6                        mov     di,sel_drv_w
+ DA53 8B9DD1DA                          mov     bx,ds:dph_addr[di]
+ DA57 268937                            mov     es:[bx],si
+ DA5A 2EA07CD6                          mov     al,sel_drv
+ DA5E 2EA27FD6                          mov     ok_drv,al
+ DA62 C3                                ret
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE  12
+
+
+
+ DA63 BB0000            selerr1:        mov     bx,0
+ DA66 2EC6067CD6FF      selerr:         mov     sel_drv,-1
+ DA6C C3                                ret
+                        ;-------------------------------------------
+ DA6D 33FA              now_pointer     dw      DPH
+ DA6F 0000              now_drive       dw      0
+ DA71 000000000000      CSV_size        dw      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      000000000000
+      000000000000
+      000000000000
+      000000000000
+      0000
+ DA91 000000000000      ALV_size        dw      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      000000000000
+      000000000000
+      000000000000
+      000000000000
+      0000
+ DAB1 000000000000      DPB_addr        dw      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      000000000000
+      000000000000
+      000000000000
+      000000000000
+      0000
+ DAD1 000000000000      DPH_addr        dw      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      000000000000
+      000000000000
+      000000000000
+      000000000000
+      0000
+
+                        setup_dph:
+ DAF1 8CC8                              mov     ax,cs
+ DAF3 8ED8                              mov     ds,ax
+
+ DAF5 B91000                            mov     cx,16
+ DAF8 51                get_dph_loop:   push    cx
+ DAF9 E8BC00       DBB8                 call    get_dph
+ DAFC 2EFF066FDA                        inc     now_drive
+ DB01 59                                pop     cx
+ DB02 E2F4         DAF8                 loop    get_dph_loop
+
+ DB04 2E8E0606D6                        mov     es,seg80
+ DB09 B91000                            mov     cx,16
+ DB0C BB0000                            mov     bx,0
+ DB0F B833FA                            mov     ax,DPH
+ DB12 8BD0              chk_size_loop:  mov     dx,ax
+ DB14 2E8BB791DA                        mov     si,ALV_size[bx]
+ DB19 23F6                              and     si,si
+ DB1B 740A         DB27                 jz      chk_size_1
+ DB1D 03C6                              add     ax,si
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE  13
+
+
+ DB1F 2E038771DA                        add     ax,CSV_size[bx]
+ DB24 051F00                            add     ax,31
+                        chk_size_1:     
+ DB27 3D18FF                            cmp     ax,DIRBUF
+ DB2A 7609         DB35                 jbe     space_ok
+ DB2C 8BC2                              mov     ax,dx
+ DB2E 2EC787D1DA00                      mov     dph_addr[bx],0
+      00
+ DB35 43                space_ok:       inc     bx
+ DB36 43                                inc     bx
+ DB37 E2D9         DB12                 loop    chk_size_loop
+
+ DB39 B91000                            mov     cx,16
+ DB3C BE0000                            mov     si,0
+ DB3F 51                set_dpb_loop:   push    cx
+ DB40 2E8B9CD1DA                        mov     bx,dph_addr[si]
+ DB45 23DB                              and     bx,bx
+ DB47 7414         DB5D                 jz      set_dpb_skip
+ DB49 2EA16DDA                          mov     ax,now_pointer
+ DB4D 2689470A                          mov     es:0ah[bx],ax
+ DB51 2E83066DDA0F                      add     now_pointer,15
+ DB57 26C7470818FF                      mov     es:word ptr 08h[bx],DIRBUF
+ DB5D 59                set_dpb_skip:   pop     cx
+ DB5E 46                                inc     si
+ DB5F 46                                inc     si
+ DB60 E2DD         DB3F                 loop    set_dpb_loop
+
+ DB62 B91000                            mov     cx,16
+ DB65 BE0000                            mov     si,0
+ DB68 51                set_csv_loop:   push    cx
+ DB69 2E8B9CD1DA                        mov     bx,dph_addr[si]
+ DB6E 23DB                              and     bx,bx
+ DB70 7416         DB88                 jz      set_csv_skip
+ DB72 2E8B8C71DA                        mov     cx,csv_size[si]
+ DB77 23C9                              and     cx,cx
+ DB79 740D         DB88                 jz      set_csv_skip
+ DB7B 2EA16DDA                          mov     ax,now_pointer
+ DB7F 2689470C                          mov     es:0ch[bx],ax
+ DB83 2E010E6DDA                        add     now_pointer,cx
+ DB88 59                set_csv_skip:   pop     cx
+ DB89 46                                inc     si
+ DB8A 46                                inc     si
+ DB8B E2DB         DB68                 loop    set_csv_loop
+
+ DB8D B91000                            mov     cx,16
+ DB90 BE0000                            mov     si,0
+ DB93 51                set_alv_loop:   push    cx
+ DB94 2E8B9CD1DA                        mov     bx,dph_addr[si]
+ DB99 23DB                              and     bx,bx
+ DB9B 7412         DBAF                 jz      set_alv_skip
+ DB9D 2E8B8C91DA                        mov     cx,alv_size[si]
+ DBA2 2EA16DDA                          mov     ax,now_pointer
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE  14
+
+
+ DBA6 2689470E                          mov     es:0eh[bx],ax
+ DBAA 2E010E6DDA                        add     now_pointer,cx
+ DBAF 59                set_alv_skip:   pop     cx
+ DBB0 46                                inc     si
+ DBB1 46                                inc     si
+ DBB2 E2DF         DB93                 loop    set_alv_loop
+
+ DBB4 E8A901       DD60                 call    disp_drv
+
+ DBB7 C3                                ret
+                        ;-------------------------------------------------
+                        get_dph:
+ DBB8 2E8B1E6FDA                        mov     bx,now_drive
+ DBBD 8BCB                              mov     cx,bx
+ DBBF 2E803E7AD601                      cmp     is_98,1
+ DBC5 7514         DBDB                 jne     get_dph_1
+
+ DBC7 8A876825                          mov     al,2568h[bx]
+ DBCB 03DB                              add     bx,bx
+ DBCD 24F0                              and     al,0f0h
+ DBCF 3C90                              cmp     al,90h
+ DBD1 7433         DC06                 je      disk_2HD
+ DBD3 3C70                              cmp     al,70h
+ DBD5 743F         DC16                 je      disk_2DD
+ DBD7 3C50                              cmp     al,50h
+ DBD9 744B         DC26                 je      disk_2D
+
+ DBDB E83D49       251B get_dph_1:      call    seldsk
+ DBDE 23DB                              and     bx,bx
+ DBE0 7461         DC43                 je      set_dph_err
+ DBE2 8B770A                            mov     si,0ah[bx]
+ DBE5 8B440B                            mov     ax,0bh[si]
+ DBE8 8B4C05                            mov     cx,05h[si]
+ DBEB 41                                inc     cx      
+ DBEC D1E9                              shr     cx,1
+ DBEE D1E9                              shr     cx,1
+ DBF0 D1E9                              shr     cx,1
+ DBF2 41                                inc     cx
+ DBF3 2E8B1E6FDA                        mov     bx,now_drive
+ DBF8 03DB                              add     bx,bx
+ DBFA 2E898771DA                        mov     csv_size[bx],ax
+ DBFF 2E898F91DA                        mov     alv_size[bx],cx
+ DC04 EB2E         DC34                 jmps    set_dph_addr
+
+ DC06 2EC78771DA40      disk_2HD:       mov     csv_size[bx],64
+      00
+ DC0D 2EC78791DA3E                      mov     alv_size[bx],62
+      00
+ DC14 EB1E         DC34                 jmps    set_dph_addr
+ DC16 2EC78771DA20      disk_2DD:       mov     csv_size[bx],32
+      00
+ DC1D 2EC78791DA28                      mov     alv_size[bx],40
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE  15
+
+
+      00
+ DC24 EB0E         DC34                 jmps    set_dph_addr
+ DC26 2EC78771DA20      disk_2D:        mov     csv_size[bx],32
+      00
+ DC2D 2EC78791DA14                      mov     alv_size[bx],20
+      00
+                        set_dph_addr:
+ DC34 2EA16DDA                          mov     ax,now_pointer
+ DC38 2E8987D1DA                        mov     dph_addr[bx],ax
+ DC3D 2E83066DDA10                      add     now_pointer,16
+                        set_dph_err:
+ DC43 C3                                ret
+                        ;--------------------------------------
+                        no_bdos_error:
+ DC44 BA07D7                            mov     dx,offset no_bdos_msg
+ DC47 EB08         DC51                 jmps    err_exit
+                        no_emulator_error:
+ DC49 BA23D7                            mov     dx,offset no_z_msg
+ DC4C EB03         DC51                 jmps    err_exit
+                        no_mem:
+ DC4E BA3CD7                            mov     dx,offset errmsg
+ DC51 B109              err_exit:       mov     cl,9
+ DC53 CDE0                              int     0e0h            ;display error message
+ DC55 B90000                            mov     cx,0
+ DC58 BA0000                            mov     dx,0
+ DC5B CDE0                              int     0e0h
+                        ;-------------------------------------
+                        read_bdosccp:
+ DC5D 8CC8                              mov     ax,cs
+ DC5F 8ED8                              mov     ds,ax
+ DC61 B10F                              mov     cl,0fh
+ DC63 BA32D6                            mov     dx,offset fcb
+ DC66 CDE0                              int     0e0h            ;open 'CPM80-64.BIN'
+ DC68 3C03                              cmp     al,3
+ DC6A 7735         DCA1                 ja      bdosccp_err
+
+ DC6C B123                              mov     cl,23h
+ DC6E BA32D6                            mov     dx,offset fcb
+ DC71 CDE0                              int     0e0h            ;compute file size
+ DC73 2EA153D6                          mov     ax,f_size
+ DC77 3D2D00                            cmp     ax,45           ;file size ok?
+ DC7A 7525         DCA1                 jne     bdosccp_err
+
+ DC7C B133                              mov     cl,33h
+ DC7E 8CCA                              mov     dx,cs
+ DC80 CDE0                              int     0e0h            ;set DMA base
+ DC82 B11A                              mov     cl,1ah
+ DC84 B92C00                            mov     cx,02ch
+ DC87 BA00C0                            mov     dx,offset bdosccp
+                        read_loop:                              ;read BDOS & CCP
+ DC8A 51                                push    cx
+ DC8B B11A                              mov     cl,1ah
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE  16
+
+
+ DC8D 52                                push    dx
+ DC8E CDE0                              int     0e0h
+ DC90 B114                              mov     cl,14h
+ DC92 BA32D6                            mov     dx,offset fcb
+ DC95 CDE0                              int     0e0h
+ DC97 5A                                pop     dx
+ DC98 81C28000                          add     dx,128
+ DC9C 59                                pop     cx
+ DC9D E2EB         DC8A                 loop    read_loop
+
+ DC9F F8                                clc
+ DCA0 C3                                ret
+                        bdosccp_err:
+ DCA1 F9                                stc
+ DCA2 C3                                ret
+                        ;-------------------------------------
+                        read_emulator:
+ DCA3 8CC8                              mov     ax,cs
+ DCA5 8ED8                              mov     ds,ax
+ DCA7 B10F                              mov     cl,0fh
+ DCA9 BA56D6                            mov     dx,offset fcb_em
+ DCAC CDE0                              int     0e0h            ;open 'Z80EM.BIN'
+ DCAE 3C03                              cmp     al,3
+ DCB0 7736         DCE8                 ja      read_em_err
+
+ DCB2 B123                              mov     cl,23h
+ DCB4 BA56D6                            mov     dx,offset fcb_em
+ DCB7 CDE0                              int     0e0h            ;compute file size
+ DCB9 2EA177D6                          mov     ax,f_size_em
+ DCBD 3D0002                            cmp     ax,512          ;file size ok?
+ DCC0 7526         DCE8                 jne     read_em_err
+
+ DCC2 B133                              mov     cl,33h
+ DCC4 2E8B160ED8                        mov     dx,seg_z80em
+ DCC9 CDE0                              int     0e0h            ;set DMA base
+
+ DCCB B90002                            mov     cx,512
+ DCCE BA0000                            mov     dx,0
+                        readem_loop:                            ;read emulator
+ DCD1 51                                push    cx
+ DCD2 B11A                              mov     cl,1ah          ;set DMA adr
+ DCD4 52                                push    dx
+ DCD5 CDE0                              int     0e0h
+ DCD7 B114                              mov     cl,14h
+ DCD9 BA56D6                            mov     dx,offset fcb_em
+ DCDC CDE0                              int     0e0h
+ DCDE 5A                                pop     dx
+ DCDF 81C28000                          add     dx,128
+ DCE3 59                                pop     cx
+ DCE4 E2EB         DCD1                 loop    readem_loop
+ DCE6 F8                                clc
+ DCE7 C3                                ret
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE  17
+
+
+                        read_em_err:
+ DCE8 F9                                stc
+ DCE9 C3                                ret
+                        ;--------------------------------------
+ DCEA 50                put_hex4:       push    ax
+ DCEB 86E0                              xchg    ah,al
+ DCED E80100       DCF1                 call    put_hex2
+ DCF0 58                                pop     ax
+
+ DCF1 50                put_hex2:       push    ax
+ DCF2 D0E8                              shr     al,1
+ DCF4 D0E8                              shr     al,1
+ DCF6 D0E8                              shr     al,1
+ DCF8 D0E8                              shr     al,1
+ DCFA E80100       DCFE                 call    put_hex1
+ DCFD 58                                pop     ax
+
+ DCFE 50                put_hex1:       push    ax
+ DCFF 53                                push    bx
+ DD00 51                                push    cx
+ DD01 52                                push    dx
+ DD02 56                                push    si
+ DD03 57                                push    di
+ DD04 240F                              and     al,0fh
+ DD06 0430                              add     al,'0'
+ DD08 3C39                              cmp     al,'9'
+ DD0A 7602         DD0E                 jbe     put_hex1_1
+ DD0C 0407                              add     al,7
+ DD0E 8AD0              put_hex1_1:     mov     dl,al
+ DD10 B102                              mov     cl,2
+ DD12 CDE0                              int     0e0h            ;console out
+ DD14 5F                                pop     di
+ DD15 5E                                pop     si
+ DD16 5A                                pop     dx
+ DD17 59                                pop     cx
+ DD18 5B                                pop     bx
+ DD19 58                                pop     ax
+ DD1A C3                                ret
+
+ DD1B 50                crlf:           push    ax
+ DD1C 53                                push    bx
+ DD1D 51                                push    cx
+ DD1E 52                                push    dx
+ DD1F 56                                push    si
+ DD20 57                                push    di
+ DD21 B20D                              mov     dl,0dh
+ DD23 B102                              mov     cl,2
+ DD25 CDE0                              int     0e0h
+ DD27 B20A                              mov     dl,0ah
+ DD29 B102                              mov     cl,2
+ DD2B CDE0                              int     0e0h
+ DD2D 5F                                pop     di
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE  18
+
+
+ DD2E 5E                                pop     si
+ DD2F 5A                                pop     dx
+ DD30 59                                pop     cx
+ DD31 5B                                pop     bx
+ DD32 58                                pop     ax
+ DD33 C3                                ret
+
+ DD34 50                put_sp:         push    ax
+ DD35 53                                push    bx
+ DD36 51                                push    cx
+ DD37 52                                push    dx
+ DD38 56                                push    si
+ DD39 57                                push    di
+ DD3A B220                              mov     dl,20h
+ DD3C B102                              mov     cl,2
+ DD3E CDE0                              int     0e0h
+ DD40 5F                                pop     di
+ DD41 5E                                pop     si
+ DD42 5A                                pop     dx
+ DD43 59                                pop     cx
+ DD44 5B                                pop     bx
+ DD45 58                                pop     ax
+ DD46 C3                                ret     
+                        ;--------------------------------------
+ DD47 41                drv_letter      db      'A' 
+ DD48 3A2046697865      fix_str         db      ': Fixed',0dh,0ah,24h
+      640D0A24
+ DD52 3A2052656D6F      rem_str         db      ': Removable',0dh,0ah,24h
+      7661626C650D
+      0A24
+
+ DD60 BB0000            disp_drv:       mov     bx,0
+ DD63 B91000                            mov     cx,16
+ DD66 2E8E0606D6                        mov     es,seg80
+                                        
+ DD6B 2E8B87D1DA        disp_dph_loop:  mov     ax,DPH_addr[bx]
+ DD70 23C0                              and     ax,ax
+ DD72 7419         DD8D                 jz      no_drv
+ DD74 8BF0                              mov     si,ax
+ DD76 E81E00       DD97                 call    put_drv_letter
+ DD79 2E8B8771DA                        mov     ax,csv_size[bx]
+ DD7E 23C0                              and     ax,ax
+ DD80 7405         DD87                 jz      fixed_disk
+ DD82 BA52DD                            mov     dx,offset rem_str 
+ DD85 EB03         DD8A                 jmps    rem_disk
+ DD87 BA48DD            fixed_disk:     mov     dx,offset fix_str
+ DD8A E82000       DDAD rem_disk:       call    put_str
+
+ DD8D 43                no_drv:         inc     bx
+ DD8E 43                                inc     bx
+ DD8F 2EFE0647DD                        inc     drv_letter
+ DD94 E2D5         DD6B                 loop    disp_dph_loop
+CP/M ASM86 1.1  SOURCE: CPM80.A86                                                                            PAGE  19
+
+
+ DD96 C3                                ret
+
+ DD97 50                put_drv_letter: push    ax
+ DD98 53                                push    bx
+ DD99 51                                push    cx
+ DD9A 52                                push    dx
+ DD9B 56                                push    si
+ DD9C 57                                push    di
+ DD9D B102                              mov     cl,2
+ DD9F 2E8A1647DD                        mov     dl,drv_letter
+ DDA4 CDE0                              int     0e0h
+ DDA6 5F                                pop     di
+ DDA7 5E                                pop     si
+ DDA8 5A                                pop     dx
+ DDA9 59                                pop     cx
+ DDAA 5B                                pop     bx
+ DDAB 58                                pop     ax
+ DDAC C3                                ret
+
+ DDAD 50                put_str:        push    ax
+ DDAE 53                                push    bx
+ DDAF 51                                push    cx
+ DDB0 52                                push    dx
+ DDB1 56                                push    si
+ DDB2 57                                push    di
+ DDB3 B109                              mov     cl,9
+ DDB5 CDE0                              int     0e0h
+ DDB7 5F                                pop     di
+ DDB8 5E                                pop     si
+ DDB9 5A                                pop     dx
+ DDBA 59                                pop     cx
+ DDBB 5B                                pop     bx
+ DDBC 58                                pop     ax
+ DDBD C3                                ret
+                        ;--------------------------------------
+ DDBE 00                owari           db      0
+                                        end
+
+
+END OF ASSEMBLY.  NUMBER OF ERRORS:   0.  USE FACTOR:  5%
+                      pop     si
+ DDB9 5A                                pop     dx
+ DDBA 59            

@@ -1,0 +1,900 @@
+;	CP/M-80 2.2 on CP/M-86
+;
+;	Copyright (C) 2025 by Gazelle
+;
+;Permission is hereby granted, free of charge, to any person
+;obtaining a copy of this software and associated documentation
+;files (the "Software"), to deal in the Software without
+;restriction, including without limitation the rights to use,
+;copy, modify, merge, publish, distribute, sublicense, and/or sell
+;copies of the Software, and to permit persons to whom the
+;Software is furnished to do so, subject to the following
+;conditions:
+;
+;The above copyright notice and this permission notice shall be
+;included in all copies or substantial portions of the Software.
+;
+;THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+;EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+;OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+;NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+;HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+;WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+;FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+;OTHER DEALINGS IN THE SOFTWARE.
+
+;Repository https://github.com/Gazelle8087/CPM80-on-CPM86
+;
+;2025/5/23 Rev. 1.00 Initial release
+
+free_top	equ	0c40h
+ccptop		equ	0e400h
+bdostop		equ	0ec06h
+biostop		equ	0fa00h
+DPH		equ	0fa33h
+DIRBUF		equ	0ff18h
+XLT_80		equ	0ff98h
+bios_code_start	equ	0ff98h
+bios86_area	equ	0c000h
+
+		cseg
+		org	100h
+
+		mov	ax,cs
+		mov	ds,ax
+		mov	cl,9
+		mov	dx,offset open_msg
+		int	0e0h		;display open message
+
+		mov	ax,0
+		mov	es,ax
+		mov	ax,es:.382h	;segment of INT E0
+		cmp	ax,word ptr 60h ;bios segment is 60h ?
+		jbe	bios_seg_ok
+		jmp	no_mem
+bios_seg_ok:
+		mov	bios_seg,ax
+
+		mov	ax,0
+		mov	es,ax
+		mov	ax,es:.370h	;offset  of INT DC
+		mov	bx,es:.372h	;segment of INT DC
+		mov	cx,es:.374h	;offset  of INT DD 
+
+		cmp	ax,cx
+		je	is_not_98
+		cmp	bx,060h
+		jne	is_not_98
+		mov	ax,cs
+		mov	ds,ax
+		mov	es,ax
+		mov	is98,1
+		mov	dx,offset is98_msg
+		mov	cl,9
+		int	0e0h
+is_not_98:	
+		call	crlf
+		mov	cl,38h		;alloc ABS memory
+		mov	dx,offset MCB1	;for BIOS routine
+		int	0e0h
+		and	al,al
+		jz	biosmem_ok
+		jmp	no_mem
+biosmem_ok:
+		mov	cl,37h		;alloc memory
+		mov	dx,offset seg80	;for CP/M-80 memory
+		int	0e0h
+		and	al,al
+		jz	Z80mem_ok
+		jmp	no_mem
+z80mem_ok:
+		mov	cl,37h		;alloc memory
+		mov	dx,offset MCB3	;for Z80 emulator
+		int	0e0h
+		and	al,al
+		jz	mem_ok
+		jmp	no_mem
+mem_ok:
+		mov	ax,bios_seg
+		mov	es,ax
+		mov	si,bios86_area
+		mov	di,si
+		xor	cx,cx
+		sub	cx,si
+		shr	cx,1
+		cld
+		rep	movsw		;transfer CP/M-86 BIOS
+
+		db	0eah
+		dw	go80
+bios_seg	dw	60h		;Jump to CP/M-80 emulation routine
+;-----------------------------------
+	org	2500h
+jmp_tbl:
+init:		jmp	init
+wboot:		jmp	wboot
+const:		jmp	const
+conin:		jmp	conin
+conout:		jmp	conout
+listo:		jmp	listo
+punch:		jmp	punch
+reader:		jmp	reader
+home:		jmp	home
+seldsk:		jmp	seldsk
+settrk:		jmp	settrk
+setsec:		jmp	setsec
+setdma:		jmp	setdma
+read:		jmp	read
+write:		jmp	write
+listst:		jmp	listst
+sectran:	jmp	sectran
+setdmab:	jmp	setdmab
+getsegb:	jmp	getsegb
+getiob:		jmp	getiob
+setiob:		jmp	setiob
+
+;---------------------------------------------------
+;---------------  Driver routine  ------------------
+;---------------------------------------------------
+		org	bios86_area
+
+bdosccp		rs	biostop - ccptop	;BDOS & CCP is read here 
+
+MCB1		dw	free_top
+		dw	1000h-bios86_area/16	;16KB
+		dw	0
+
+seg80		dw	0			;Z80 code is loaded here
+		dw	1000h			;64KB
+		dw	0
+
+MCB3		dw	0			;Z80EM.BIN is loaded here
+		dw	1000h			;64KB
+		dw	0
+
+biostable	dw	init0
+		dw	wboot0
+		dw	const
+		dw	conin
+		dw	conout
+		dw	listo
+		dw	punch
+		dw	reader
+		dw	home
+		dw	seldsk0
+		dw	settrk
+		dw	setsec
+		dw	setdma
+		dw	read
+		dw	write
+		dw	listst
+
+fcb		db	0,'CPM80-64BIN'
+		rb	21
+f_size		dw	0
+		db	0
+
+fcb_em		db	0,'Z80EM   BIN'
+		rb	21
+f_size_em	dw	0
+		db	0
+
+is98		db	0
+user_code	db	0
+sel_drv		db	0
+sel_drv_W	dw	0
+ok_drv		db	0
+;undef_flag	db	0
+save_si		dw	0
+save_di		dw	0
+
+open_msg	db	'Running on software Z80 emulation.',0dh,0ah
+		db	'64k CP/M-80 Version 2.2',0dh,0ah
+		db	'Copyright (c) Gazelle 2025',0dh,0ah,24h
+is98_msg	db	'PC-98x1 running',0dh,0ah,24h 
+endmsg		db	0dh,0ah,'Return to CP/M-86.',0dh,0ah,24h
+no_bdos_msg	db	0dh,0ah,'CPM80-64.BIN not found.',0dh,0ah,24h
+no_z_msg	db	0dh,0ah,'Z80EM.BIN not found.',0dh,0ah,24h
+errmsg		db	0dh,0ah,'no memory.',0dh,0ah,24h
+undef_msg	db	0dh,0ah,'undefined OP code $'
+unexe_msg	db	0dh,0ah,'unexecutable OP code $'
+in_err_msg	db	0dh,0ah,'Internal error.$'
+em_err_msg	db	' at $'
+
+go80:
+		mov	ax,MCB3
+		mov	seg_z80em,ax
+
+		call	read_bdosccp	;read CPM80-64.BIN
+		jnc	read_bdos_ok
+		jmp	no_bdos_error
+read_bdos_ok:
+		call	read_emulator	;read Z80EM.BIN
+		jnc	read_emz80_ok
+		jmp	no_emulator_error
+read_emz80_ok:
+		mov	cl,07h		;get I/O byte
+		int	0e0h
+		mov	es,seg80
+		mov	es:.3,al
+
+		mov	cl,20h		;get user code
+		mov	dl,0ffh
+		int	0e0h
+		mov	user_code,al
+
+		mov	cl,19h		;get current drive		
+		int	0e0h
+		
+		mov	bl,user_code
+		and	bl,0fh
+		mov	cl,4
+		shl	bl,cl
+
+		and	al,0fh
+		add	al,bl
+		mov	cl,al
+		mov	es,seg80
+		mov	es:.4,al
+
+		call	setup_dph
+
+		jmp	wboot0		;transfer CP/M-80 BDOS & CCP
+
+;------------------------------------------------
+bios_em:
+		mov	bp,cs
+		mov	ds,bp
+		mov	es,bp
+		mov	ds:save_si,si	;ds=cs=60h
+		mov	ds:save_di,di
+		mov	ah,0
+		mov	di,ax
+		add	di,ax
+		call	ds:biostable[di]
+emz80:
+		mov	si,ds:save_si
+		mov	di,ds:save_di
+		mov	bp,ds:seg80
+		mov	ds,bp
+		mov	es,bp
+emz80_1:
+		db	09ah	;CALL far
+		dw	0e0h	;Z80 emulator entry point
+seg_z80em	dw	0	;emulator loading segment
+
+		cmp	bp,2
+		jne	em_error
+		cmp	si,biostop
+		jb	em_error
+		lodsb
+		cmp	al,10h
+		jb	bios_em
+		jmp	em_error_0
+;--------------------------------------
+em_error_0:	dec	si
+em_error:	mov	dx,offset unexe_msg
+		mov	cx,1
+		mov	di,1
+		cmp	bp,1
+		je	z80_error_0
+
+		mov	cx,2
+		mov	di,1
+		cmp	bp,2
+		je	z80_error_0
+
+		mov	cx,2
+		mov	di,1
+		cmp	bp,3
+		je	z80_error_0
+
+		mov	cx,2
+		mov	di,2
+		cmp	bp,4
+		je	z80_error_0		
+
+		mov	dx,offset undef_msg
+		mov	cx,2
+		mov	di,2
+		cmp	bp,5
+		je	z80_error_0
+
+		mov	cx,4
+		mov	di,4
+		cmp	bp,6
+		je	z80_error_0
+
+		mov	cx,1
+		mov	di,1
+		cmp	bp,7
+		je	z80_error_0
+
+		jmp	internal_error
+z80_error_0:
+		push	cx
+		mov	ax,cs
+		mov	ds,ax
+		mov	cl,9		;print string
+		int	0e0h
+		pop	cx
+
+		sub	si,di
+		mov	di,si
+		mov	es,seg80
+z80_error_1:
+		push	cx
+		push	es
+		mov	al,es:[si]
+		call	put_hex2
+		inc	si
+		pop	es
+		pop	cx
+		loop	z80_error_1
+
+		mov	dx,offset em_err_msg
+		mov	cl,9		;print string
+		int	0e0h
+
+		mov	ax,di
+		call	put_hex4
+em_error_2:	jmp	init0
+
+internal_error:	mov	dx,offset in_err_msg
+		mov	cl,9
+		int	0e0h
+		jmp	init0
+;------------------------------------------------
+init0:
+		mov	ax,cs
+		mov	ds,ax
+		mov	dx,offset endmsg
+		mov	cl,9		;print string
+		int	0e0h
+		mov	cx,0		;System reset
+		mov	dx,0
+		int	0e0h
+;---------------------------------------------------
+wboot0:
+		mov	ax,bios_seg
+		mov	es,ax
+		mov	di,offset DPBADDR
+		mov	ax,0
+		mov	cx,16
+		cld
+		rep	stosw			;clear DPB table
+
+		mov	ax,cs
+		mov	ds,ax
+		mov	es,seg80
+
+		mov	si,offset bdosccp
+		mov	di,ccptop
+		mov	cx,(biostop - ccptop)/2	;0b00h
+		rep	movsw			;transfer CP/M-80 BDOS & CCP
+
+		mov	di,biostop
+		mov	dx,offset init80 - offset sec_table + bios_code_start
+		mov	bl,0c3h
+		mov	cx,17
+put_bios_loop:			
+		mov	al,bl		;store bios jump table
+		stosb
+		mov	ax,dx
+		stosw
+		add	dx,3
+		loop	put_bios_loop
+
+		mov	si,offset sec_table
+		mov	di,bios_code_start	
+		mov	cx,offset bios_code_end - offset sec_table
+		rep	movsb 
+
+		mov	al,0c3h
+		mov	es:.0,al
+		mov	es:.1,word ptr biostop + 3	;set jump table at 0
+		mov	es:.5,al
+		mov	es:.6,word ptr bdostop		;BDOS entry address
+		cmp	sel_drv,-1
+		jne	drvno_ok
+
+		mov	al,ok_drv
+		mov	sel_drv,al
+		mov	es:.4,al	;set current drive
+drvno_ok:
+		mov	cl,33h		;Set DMA base
+		mov	dx,seg80
+		int	0e0h
+		mov	cl,1ah		;set DMA addr
+		mov	dx,80h
+		int	0e0h
+		mov	es,seg80
+		mov	cl,es:.4
+		mov	si,ccptop
+		mov	di,80h
+		mov	save_di,di
+		mov	save_si,si
+		mov	bp,seg80
+		mov	ds,bp
+		mov	es,bp
+		jmp	emz80_1
+
+;---------------------------------------------------------
+;	BIOS code for CP/M-80 placed on 0ff98h
+;---------------------------------------------------------
+sec_table	db	1,7,13,19,25,5,11,17,23,3,9,15,21
+		db	2,8,14,20,26,6,12,18,24,4,10,16,22
+
+codemacro	z	imm:db
+		db	0d3h	;OUT	(n),A
+		db	imm
+		db	0c9h	;RET
+endm
+
+init80:		z	0
+wboot80:	z	1
+const80:	z	2
+conin80:	z	3
+conout80:	z	4
+list80:		z	5
+punch80:	z	6
+reader80:	z	7
+home80:		z	8
+seldsk80:	z	9
+settrk80:	z	10
+setsec80:	z	11
+setdma80:	z	12
+read80:		z	13
+write80:	z	14
+listst80:	z	15
+sectran80:
+		db	60h	;MOV	H,B
+		db	69h	;MOV	L,C
+		db	7bh	;MOV	A,E
+		db	82h	;ADD	D
+		db	0c2h	;JNZ	skew
+		dw	offset skew + bios_code_start - offset sec_table
+		db	23h	;INX	H
+		db	0c9h	;RET
+skew:
+		db	19h	;DAD	D
+		db	6eh	;MOV	L,M
+		db	26h,0	;MVI	H,0
+		db	0c9h	;RET
+bios_code_end:
+;-------------------------------------------------
+;	END of CP/M-80 bios code
+;-------------------------------------------------
+XLT_86		dw	0
+
+seldsk0:				;cs=ds=60h
+		mov	sel_drv,cl	;cl selected drive
+		mov	al,cl
+		mov	ah,0
+		add	ax,ax
+		mov	sel_drv_w,ax
+		call	seldsk
+		and	bx,bx		;bx DPH addr
+		jnz	sel_ok1
+		jmp	selerr
+
+sel_ok1:	mov	ax,ds:[bx]
+		and	ax,ax	
+		jz	sel_ok
+		mov	dx,ax
+		mov	ax,XLT_86
+		and	ax,ax
+		jnz	chk_XLT_86
+		mov	XLT_86,dx
+		jmps	sel_ok
+chk_XLT_86:	cmp	ax,dx
+		jne	sel_err
+sel_ok:
+		mov	si,sel_drv_w
+		mov	di,dph_addr[si]		;di DPH of CPM80
+		mov	es,seg80		;es segment of 80 area 
+		mov	ax,es:10[di]		;ax DPB of CPM80
+		cmp	ax,10[bx]		;10[bx] DPB of CPM86
+		jne	first_acc		;if DPB80=DPB86 
+		mov	al,sel_drv
+		mov	ok_drv,al
+		ret
+first_acc:					;copy DPB(86) to DPB(80)
+		mov	si,ds:10[bx]		;si=DPB address of 86
+		mov	di,sel_drv_w
+		mov	ds:DPB_addr[di],si	;store DPBADDR
+		mov	di,ds:DPH_addr[di]	;di=DPH address of 80
+		and	di,di			;DPH = 0 then no drive
+		jz	selerr1
+		mov	di,es:10[di]		;di=DPB address of 80
+		mov	cx,7
+		cld
+		rep	movsw
+		movsb
+
+		mov	si,ds:[bx]		;si=skew table of 86	
+		and	si,si
+		jz	no_skew
+		mov	di,XLT_80		;di=skew table of 80
+		mov	cx,13
+		rep	movsw
+		mov	si,XLT_80
+no_skew:
+		mov	di,sel_drv_w
+		mov	bx,ds:dph_addr[di]
+		mov	es:[bx],si
+		mov	al,sel_drv
+		mov	ok_drv,al
+		ret
+
+selerr1:	mov	bx,0
+selerr:		mov	sel_drv,-1
+		ret
+;-------------------------------------------
+now_pointer	dw	DPH
+now_drive	dw	0
+CSV_size	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+ALV_size	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+DPB_addr	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+DPH_addr	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+setup_dph:
+		mov	ax,cs
+		mov	ds,ax
+
+		mov	cx,16
+get_dph_loop:	push	cx
+		call	get_dph
+		inc	now_drive
+		pop	cx
+		loop	get_dph_loop
+
+		mov	es,seg80
+		mov	cx,16
+		mov	bx,0
+		mov	ax,DPH
+chk_size_loop:	mov	dx,ax
+		mov	si,ALV_size[bx]
+		and	si,si
+		jz	chk_size_1
+		add	ax,si
+		add	ax,CSV_size[bx]
+		add	ax,31
+chk_size_1:	
+		cmp	ax,DIRBUF
+		jbe	space_ok
+		mov	ax,dx
+		mov	dph_addr[bx],0
+space_ok:	inc	bx
+		inc	bx
+		loop	chk_size_loop
+
+		mov	cx,16
+		mov	si,0
+set_dpb_loop:	push	cx
+		mov	bx,dph_addr[si]
+		and	bx,bx
+		jz	set_dpb_skip
+		mov	ax,now_pointer
+		mov	es:0ah[bx],ax
+		add	now_pointer,15
+		mov	es:word ptr 08h[bx],DIRBUF
+set_dpb_skip:	pop	cx
+		inc	si
+		inc	si
+		loop	set_dpb_loop
+
+		mov	cx,16
+		mov	si,0
+set_csv_loop:	push	cx
+		mov	bx,dph_addr[si]
+		and	bx,bx
+		jz	set_csv_skip
+		mov	cx,csv_size[si]
+		and	cx,cx
+		jz	set_csv_skip
+		mov	ax,now_pointer
+		mov	es:0ch[bx],ax
+		add	now_pointer,cx
+set_csv_skip:	pop	cx
+		inc	si
+		inc	si
+		loop	set_csv_loop
+
+		mov	cx,16
+		mov	si,0
+set_alv_loop:	push	cx
+		mov	bx,dph_addr[si]
+		and	bx,bx
+		jz	set_alv_skip
+		mov	cx,alv_size[si]
+		mov	ax,now_pointer
+		mov	es:0eh[bx],ax
+		add	now_pointer,cx
+set_alv_skip:	pop	cx
+		inc	si
+		inc	si
+		loop	set_alv_loop
+
+		call	disp_drv
+
+		ret
+;-------------------------------------------------
+get_dph:
+		mov	bx,now_drive
+		mov	cx,bx
+		cmp	is_98,1
+		jne	get_dph_1
+
+		mov	al,2568h[bx]
+		add	bx,bx
+		and	al,0f0h
+		cmp	al,90h
+		je	disk_2HD
+		cmp	al,70h
+		je	disk_2DD
+		cmp	al,50h
+		je	disk_2D
+
+get_dph_1:	call	seldsk
+		and	bx,bx
+		je	set_dph_err
+		mov	si,0ah[bx]
+		mov	ax,0bh[si]
+		mov	cx,05h[si]
+		inc	cx	
+		shr	cx,1
+		shr	cx,1
+		shr	cx,1
+		inc	cx
+		mov	bx,now_drive
+		add	bx,bx
+		mov	csv_size[bx],ax
+		mov	alv_size[bx],cx
+		jmps	set_dph_addr
+
+disk_2HD:	mov	csv_size[bx],64
+		mov	alv_size[bx],62
+		jmps	set_dph_addr
+disk_2DD:	mov	csv_size[bx],32
+		mov	alv_size[bx],40
+		jmps	set_dph_addr
+disk_2D:	mov	csv_size[bx],32
+		mov	alv_size[bx],20
+set_dph_addr:
+		mov	ax,now_pointer
+		mov	dph_addr[bx],ax
+		add	now_pointer,16
+set_dph_err:
+		ret
+;--------------------------------------
+no_bdos_error:
+		mov	dx,offset no_bdos_msg
+		jmps	err_exit
+no_emulator_error:
+		mov	dx,offset no_z_msg
+		jmps	err_exit
+no_mem:
+		mov	dx,offset errmsg
+err_exit:	mov	cl,9
+		int	0e0h		;display error message
+		mov	cx,0
+		mov	dx,0
+		int	0e0h
+;-------------------------------------
+read_bdosccp:
+		mov	ax,cs
+		mov	ds,ax
+		mov	cl,0fh
+		mov	dx,offset fcb
+		int	0e0h		;open 'CPM80-64.BIN'
+		cmp	al,3
+		ja	bdosccp_err
+
+		mov	cl,23h
+		mov	dx,offset fcb
+		int	0e0h		;compute file size
+		mov	ax,f_size
+		cmp	ax,45		;file size ok?
+		jne	bdosccp_err
+
+		mov	cl,33h
+		mov	dx,cs
+		int	0e0h		;set DMA base
+		mov	cl,1ah
+		mov	cx,02ch
+		mov	dx,offset bdosccp
+read_loop:				;read BDOS & CCP
+		push	cx
+		mov	cl,1ah
+		push	dx
+		int	0e0h
+		mov	cl,14h
+		mov	dx,offset fcb
+		int	0e0h
+		pop	dx
+		add	dx,128
+		pop	cx
+		loop	read_loop
+
+		clc
+		ret
+bdosccp_err:
+		stc
+		ret
+;-------------------------------------
+read_emulator:
+		mov	ax,cs
+		mov	ds,ax
+		mov	cl,0fh
+		mov	dx,offset fcb_em
+		int	0e0h		;open 'Z80EM.BIN'
+		cmp	al,3
+		ja	read_em_err
+
+		mov	cl,23h
+		mov	dx,offset fcb_em
+		int	0e0h		;compute file size
+		mov	ax,f_size_em
+		cmp	ax,512		;file size ok?
+		jne	read_em_err
+
+		mov	cl,33h
+		mov	dx,seg_z80em
+		int	0e0h		;set DMA base
+
+		mov	cx,512
+		mov	dx,0
+readem_loop:				;read emulator
+		push	cx
+		mov	cl,1ah		;set DMA adr
+		push	dx
+		int	0e0h
+		mov	cl,14h
+		mov	dx,offset fcb_em
+		int	0e0h
+		pop	dx
+		add	dx,128
+		pop	cx
+		loop	readem_loop
+		clc
+		ret
+read_em_err:
+		stc
+		ret
+;--------------------------------------
+put_hex4:	push	ax
+		xchg	ah,al
+		call	put_hex2
+		pop	ax
+
+put_hex2:	push	ax
+		shr	al,1
+		shr	al,1
+		shr	al,1
+		shr	al,1
+		call	put_hex1
+		pop	ax
+
+put_hex1:	push	ax
+		push	bx
+		push	cx
+		push	dx
+		push	si
+		push	di
+		and	al,0fh
+		add	al,'0'
+		cmp	al,'9'
+		jbe	put_hex1_1
+		add	al,7
+put_hex1_1:	mov	dl,al
+		mov	cl,2
+		int	0e0h		;console out
+		pop	di
+		pop	si
+		pop	dx
+		pop	cx
+		pop	bx
+		pop	ax
+		ret
+
+crlf:		push	ax
+		push	bx
+		push	cx
+		push	dx
+		push	si
+		push	di
+		mov	dl,0dh
+		mov	cl,2
+		int	0e0h
+		mov	dl,0ah
+		mov	cl,2
+		int	0e0h
+		pop	di
+		pop	si
+		pop	dx
+		pop	cx
+		pop	bx
+		pop	ax
+		ret
+
+put_sp:		push	ax
+		push	bx
+		push	cx
+		push	dx
+		push	si
+		push	di
+		mov	dl,20h
+		mov	cl,2
+		int	0e0h
+		pop	di
+		pop	si
+		pop	dx
+		pop	cx
+		pop	bx
+		pop	ax
+		ret	
+;--------------------------------------
+drv_letter	db	'A' 
+fix_str		db	': Fixed',0dh,0ah,24h
+rem_str		db	': Removable',0dh,0ah,24h
+
+disp_drv:	mov	bx,0
+		mov	cx,16
+		mov	es,seg80
+		
+disp_dph_loop:	mov	ax,DPH_addr[bx]
+		and	ax,ax
+		jz	no_drv
+		mov	si,ax
+		call	put_drv_letter
+		mov	ax,csv_size[bx]
+		and	ax,ax
+		jz	fixed_disk
+		mov	dx,offset rem_str 
+		jmps	rem_disk
+fixed_disk:	mov	dx,offset fix_str
+rem_disk:	call	put_str
+
+no_drv:		inc	bx
+		inc	bx
+		inc	drv_letter
+		loop	disp_dph_loop
+		ret
+
+put_drv_letter:	push	ax
+		push	bx
+		push	cx
+		push	dx
+		push	si
+		push	di
+		mov	cl,2
+		mov	dl,drv_letter
+		int	0e0h
+		pop	di
+		pop	si
+		pop	dx
+		pop	cx
+		pop	bx
+		pop	ax
+		ret
+
+put_str:	push	ax
+		push	bx
+		push	cx
+		push	dx
+		push	si
+		push	di
+		mov	cl,9
+		int	0e0h
+		pop	di
+		pop	si
+		pop	dx
+		pop	cx
+		pop	bx
+		pop	ax
+		ret
+;--------------------------------------
+owari		db	0
+		end
+
